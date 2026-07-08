@@ -268,7 +268,7 @@
   <section class="screen" id="screenCarpetas">
     <div class="panel">
       <div class="panel-title">Categorías de clasificación</div>
-      <div class="panel-sub">Ruido, Facturas, Revisar y Trabajo son las categorías base y no se pueden eliminar. Puedes añadir categorías propias: la carpeta debe existir ya en Outlook antes de añadirla aquí.</div>
+      <div class="panel-sub">Ruido, Facturas, Revisar y Trabajo vienen configuradas de fábrica, pero puedes editarlas, eliminarlas o añadir las tuyas. La carpeta correspondiente debe existir ya en Outlook antes de asignarla aquí.</div>
       <div id="categoriasError"></div>
       <div class="taxonomia-grid" id="categoriasGrid"></div>
       <button class="submit-btn secundario" id="btnMostrarFormCategoria" type="button" style="margin-top:16px;">+ Añadir categoría</button>
@@ -633,34 +633,52 @@ async function listarTodasLasCarpetas() {
 }
 
 /* ============================================================
-   GESTIÓN DE CATEGORÍAS (añadir/eliminar categorías propias)
+   GESTIÓN DE CATEGORÍAS (añadir/editar/eliminar, todas libres)
    ============================================================ */
 function renderCategorias() {
   const cont = $("categoriasGrid");
   if (!cont) return;
   cont.innerHTML = CATEGORIAS.map(cat => `
-    <div class="taxonomia-item">
+    <div class="taxonomia-item" id="catItem_${cat.id}">
       <div class="tax-nombre">${escapeHtml(cat.nombre)}</div>
       <div class="tax-regla">${escapeHtml(cat.regla || "")}</div>
-      ${cat.esBase ? '<div style="font-size:10.5px; color:var(--pizarra); margin-top:6px; font-style:italic;">Categoría base</div>' :
-        `<button type="button" class="mini-btn" style="margin-top:8px; color:#943126; border-color:#E74C3C;" onclick="eliminarCategoria('${cat.id}')">Eliminar</button>`}
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button type="button" class="mini-btn" style="color:var(--zafiro-medio); border-color:var(--zafiro-medio);" onclick="editarCategoria('${cat.id}')">Editar</button>
+        <button type="button" class="mini-btn" style="color:#943126; border-color:#E74C3C;" onclick="eliminarCategoria('${cat.id}')">Eliminar</button>
+      </div>
     </div>
   `).join("");
 }
 
 $("btnMostrarFormCategoria").addEventListener("click", () => {
   $("formNuevaCategoria").style.display = "block";
+  $("formNuevaCategoria").dataset.editandoId = "";
   $("nuevaCatNombre").value = "";
   $("nuevaCatRegla").value = "";
+  $("btnGuardarNuevaCategoria").textContent = "Guardar categoría";
   $("nuevaCatNombre").focus();
 });
 $("btnCancelarNuevaCategoria").addEventListener("click", () => {
   $("formNuevaCategoria").style.display = "none";
+  $("formNuevaCategoria").dataset.editandoId = "";
 });
+
+function editarCategoria(id) {
+  const cat = CATEGORIAS.find(c => c.id === id);
+  if (!cat) return;
+  $("formNuevaCategoria").style.display = "block";
+  $("formNuevaCategoria").dataset.editandoId = id;
+  $("nuevaCatNombre").value = cat.nombre;
+  $("nuevaCatRegla").value = cat.regla || "";
+  $("btnGuardarNuevaCategoria").textContent = "Guardar cambios";
+  $("nuevaCatNombre").scrollIntoView({ behavior: "smooth", block: "center" });
+  $("nuevaCatNombre").focus();
+}
 
 $("btnGuardarNuevaCategoria").addEventListener("click", () => {
   const nombre = $("nuevaCatNombre").value.trim();
   const regla = $("nuevaCatRegla").value.trim();
+  const editandoId = $("formNuevaCategoria").dataset.editandoId || "";
   $("categoriasError").innerHTML = "";
 
   if (!nombre) {
@@ -671,27 +689,36 @@ $("btnGuardarNuevaCategoria").addEventListener("click", () => {
     $("categoriasError").innerHTML = '<div class="error-banner">Describe la regla de clasificación: es lo que usa la IA para saber qué correo va aquí.</div>';
     return;
   }
-  if (CATEGORIAS.some(c => c.nombre.toLowerCase() === nombre.toLowerCase())) {
+  const nombreDuplicado = CATEGORIAS.some(c => c.nombre.toLowerCase() === nombre.toLowerCase() && c.id !== editandoId);
+  if (nombreDuplicado) {
     $("categoriasError").innerHTML = '<div class="error-banner">Ya existe una categoría con ese nombre.</div>';
     return;
   }
 
-  const id = generarIdCategoria(nombre);
-  const usadas = CATEGORIAS.map(c => c.claseBadge);
-  const claseBadge = CLASES_BADGE_DISPONIBLES.find(c => !usadas.includes(c)) || "badge-revisar";
+  if (editandoId) {
+    const cat = CATEGORIAS.find(c => c.id === editandoId);
+    if (cat) { cat.nombre = nombre; cat.regla = regla; }
+    $("categoriasError").innerHTML = '<div class="info-banner">Categoría actualizada.</div>';
+  } else {
+    const id = generarIdCategoria(nombre);
+    const usadas = CATEGORIAS.map(c => c.claseBadge);
+    const claseBadge = CLASES_BADGE_DISPONIBLES.find(c => !usadas.includes(c)) || "badge-revisar";
+    CATEGORIAS.push({ id, nombre, claseBadge, regla, esBase: false });
+    $("categoriasError").innerHTML = '<div class="info-banner">Categoría añadida. Recuerda: la carpeta correspondiente debe existir ya en Outlook. Selecciónala abajo y pulsa "Actualizar lista de carpetas" si no aparece todavía.</div>';
+  }
 
-  CATEGORIAS.push({ id, nombre, claseBadge, regla, esBase: false });
   guardarCategorias();
   renderCategorias();
+  renderSelectsCarpetas();
   $("formNuevaCategoria").style.display = "none";
-
-  $("categoriasError").innerHTML = '<div class="info-banner">Categoría añadida. Recuerda: la carpeta correspondiente debe existir ya en Outlook. Selecciónala abajo y pulsa "Actualizar lista de carpetas" si no aparece todavía.</div>';
+  $("formNuevaCategoria").dataset.editandoId = "";
 });
 
 function eliminarCategoria(id) {
   const cat = CATEGORIAS.find(c => c.id === id);
-  if (!cat || cat.esBase) return;
-  if (!confirm(`¿Eliminar la categoría "${cat.nombre}"? Esto no borra la carpeta de Outlook, solo deja de usarse para clasificar.`)) return;
+  if (!cat) return;
+  const avisoBase = cat.esBase ? "\n\nEs una categoría base de la herramienta. Si la eliminas y no queda ninguna categoría de tipo \"red de seguridad\" para correo ambiguo, ese correo se clasificará en la primera categoría de tu lista." : "";
+  if (!confirm(`¿Eliminar la categoría "${cat.nombre}"? Esto no borra la carpeta de Outlook, solo deja de usarse para clasificar.${avisoBase}`)) return;
   CATEGORIAS = CATEGORIAS.filter(c => c.id !== id);
   guardarCategorias();
   renderCategorias();
@@ -863,7 +890,11 @@ $("btnLeerCorreos").addEventListener("click", leerCorreosNuevos);
 async function moverCorreosClasificados(correos) {
   for (const correo of correos) {
     const carpetaDestino = estadoApp.carpetas[correo.categoria];
-    if (!carpetaDestino) { correo.movido = "error"; continue; }
+    if (!carpetaDestino) {
+      correo.movido = "error";
+      correo.errorMovido = "No hay ninguna carpeta de Outlook asignada a la categoría \"" + correo.categoria + "\". Asígnala en la pantalla de Carpetas.";
+      continue;
+    }
     try {
       await llamarGraphAPI(GRAPH_BASE + "/me/messages/" + correo.id + "/move", {
         method: "POST",
@@ -873,6 +904,7 @@ async function moverCorreosClasificados(correos) {
       correo.movido = true;
     } catch (err) {
       correo.movido = "error";
+      correo.errorMovido = err.message;
     }
   }
 }
@@ -1020,7 +1052,7 @@ function renderCorreoCard(correo) {
   if (correo.movido === true) {
     estadoCarpetaHtml = `<div class="estado-carpeta ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round"/></svg> Movido a "${escapeHtml(estadoApp.carpetas[correo.categoria] ? estadoApp.carpetas[correo.categoria].nombre : cat.nombre)}"</div>`;
   } else if (correo.movido === "error") {
-    estadoCarpetaHtml = `<div class="estado-carpeta error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12" stroke-linecap="round"/></svg> No se ha podido mover a la carpeta</div>`;
+    estadoCarpetaHtml = `<div class="estado-carpeta error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12" stroke-linecap="round"/></svg> No se ha podido mover a la carpeta${correo.errorMovido ? ": " + escapeHtml(correo.errorMovido) : ""}</div>`;
   }
 
   let accionesHtml = "";
