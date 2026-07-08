@@ -700,9 +700,36 @@ async function obtenerTokenAcceso() {
     });
     return resultado.accessToken;
   } catch (err) {
+    guardarEstadoAntesDeRedirect();
     await msalInstance.acquireTokenRedirect({ scopes: MSAL_SCOPES });
     throw new Error("REDIRIGIENDO");
   }
+}
+
+const STORAGE_KEY_ESTADO_TEMPORAL = "lectorOutlookJF_estadoTemporal";
+
+function guardarEstadoAntesDeRedirect() {
+  try {
+    sessionStorage.setItem(STORAGE_KEY_ESTADO_TEMPORAL, JSON.stringify({
+      correos: estadoApp.correos,
+      filtroActivo: estadoApp.filtroActivo,
+    }));
+  } catch (e) { /* si falla, simplemente no se restaura al volver */ }
+}
+
+function restaurarEstadoTrasRedirect() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY_ESTADO_TEMPORAL);
+    if (!raw) return false;
+    sessionStorage.removeItem(STORAGE_KEY_ESTADO_TEMPORAL);
+    const guardado = JSON.parse(raw);
+    if (guardado.correos && guardado.correos.length > 0) {
+      estadoApp.correos = guardado.correos;
+      estadoApp.filtroActivo = guardado.filtroActivo || "todos";
+      return true;
+    }
+  } catch (e) { /* nada que restaurar */ }
+  return false;
 }
 
 function actualizarHeaderUsuario() {
@@ -730,6 +757,11 @@ function irAPantallaTrasLogin() {
   if (todasAsignadas) {
     estadoApp.carpetas = carpetas;
     mostrarPantalla("screenDashboard");
+    const huboRestauracion = restaurarEstadoTrasRedirect();
+    if (huboRestauracion) {
+      renderDashboard();
+      $("toolbarInfo").innerHTML = '<span style="color:var(--oro-mineral); font-weight:600;">Sesión renovada.</span> Se han recuperado los correos que tenías cargados — revisa si algún borrador quedó a medio guardar.';
+    }
   } else {
     estadoApp.carpetas = carpetas || {};
     mostrarPantalla("screenCarpetas");
