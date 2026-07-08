@@ -240,27 +240,7 @@
         </div>
       </div>
 
-      <div class="field">
-        <label>Taxonomía de clasificación (fija para esta herramienta)</label>
-        <div class="taxonomia-grid">
-          <div class="taxonomia-item">
-            <div class="tax-nombre" style="color:var(--pizarra);">Ruido</div>
-            <div class="tax-regla">Publicidad, newsletters, notificaciones automáticas de plataformas, spam evidente y marketing masivo.</div>
-          </div>
-          <div class="taxonomia-item">
-            <div class="tax-nombre" style="color:var(--zafiro-medio);">Facturas</div>
-            <div class="tax-regla">Facturas de proveedores, avisos de pago, recibos y cargos bancarios.</div>
-          </div>
-          <div class="taxonomia-item">
-            <div class="tax-nombre" style="color:#C0392B;">Revisar</div>
-            <div class="tax-regla">Correo ambiguo o de baja confianza, e incidencias, quejas o urgencias. Red de seguridad: ante la duda, aquí.</div>
-          </div>
-          <div class="taxonomia-item">
-            <div class="tax-nombre" style="color:var(--oro-mineral);">Trabajo</div>
-            <div class="tax-regla">Correos de clientes, proveedores o colaboradores sobre asuntos operativos. Genera borrador automático.</div>
-          </div>
-        </div>
-      </div>
+      <div class="info-banner">Las categorías de clasificación (Ruido, Facturas, Revisar, Trabajo, y las que añadas) se gestionan en la pantalla de "Carpetas", justo después de conectar tu cuenta de Outlook.</div>
 
       <button class="submit-btn ancho" id="btnGuardarConfig" style="margin-top:8px;">Guardar configuración y continuar</button>
     </div>
@@ -287,6 +267,31 @@
   <!-- PANTALLA 3: SELECCIÓN/VERIFICACIÓN DE CARPETAS -->
   <section class="screen" id="screenCarpetas">
     <div class="panel">
+      <div class="panel-title">Categorías de clasificación</div>
+      <div class="panel-sub">Ruido, Facturas, Revisar y Trabajo son las categorías base y no se pueden eliminar. Puedes añadir categorías propias: la carpeta debe existir ya en Outlook antes de añadirla aquí.</div>
+      <div id="categoriasError"></div>
+      <div class="taxonomia-grid" id="categoriasGrid"></div>
+      <button class="submit-btn secundario" id="btnMostrarFormCategoria" type="button" style="margin-top:16px;">+ Añadir categoría</button>
+
+      <div id="formNuevaCategoria" style="display:none; margin-top:18px; border-top:1px solid var(--hielo); padding-top:18px;">
+        <div class="field-row">
+          <div class="field">
+            <label for="nuevaCatNombre">Nombre de la categoría</label>
+            <input type="text" id="nuevaCatNombre" placeholder="Ej. Comercial, Proveedores...">
+          </div>
+        </div>
+        <div class="field">
+          <label for="nuevaCatRegla">Regla de clasificación (qué correo entra aquí, para la IA)</label>
+          <textarea id="nuevaCatRegla" placeholder="Describe qué tipo de correo debe ir a esta categoría."></textarea>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="submit-btn" id="btnGuardarNuevaCategoria" type="button">Guardar categoría</button>
+          <button class="submit-btn secundario" id="btnCancelarNuevaCategoria" type="button">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
       <div class="panel-title">Carpetas de destino en tu buzón</div>
       <div class="panel-sub">Antes de clasificar correo de verdad, hace falta indicar a qué carpeta de tu buzón corresponde cada categoría. Si la carpeta todavía no existe en Outlook, créala primero y pulsa "Actualizar lista".</div>
       <div id="carpetasError"></div>
@@ -297,6 +302,7 @@
       </div>
     </div>
   </section>
+
 
   <!-- PANTALLA 4: DASHBOARD -->
   <section class="screen" id="screenDashboard">
@@ -342,15 +348,19 @@ const MSAL_SCOPES = ["Mail.Read", "Mail.ReadWrite", "User.Read"];
 const MODELO_CLAUDE = "claude-sonnet-4-6";
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
-const CATEGORIAS = [
-  { id: "ruido",    nombre: "Ruido",    claseBadge: "badge-ruido" },
-  { id: "facturas", nombre: "Facturas", claseBadge: "badge-facturas" },
-  { id: "revisar",  nombre: "Revisar",  claseBadge: "badge-revisar" },
-  { id: "trabajo",  nombre: "Trabajo",  claseBadge: "badge-trabajo" },
+const CATEGORIAS_BASE = [
+  { id: "ruido",    nombre: "Ruido",    claseBadge: "badge-ruido",    regla: "Publicidad, newsletters, notificaciones automáticas de plataformas, spam evidente y marketing masivo.", esBase: true },
+  { id: "facturas", nombre: "Facturas", claseBadge: "badge-facturas", regla: "Facturas de proveedores recibidas, avisos de pago, recibos y cargos bancarios.", esBase: true },
+  { id: "revisar",  nombre: "Revisar",  claseBadge: "badge-revisar",  regla: "Correo ambiguo o de baja confianza (red de seguridad si no encaja claramente en otra categoría), e incidencias, quejas o urgencias.", esBase: true },
+  { id: "trabajo",  nombre: "Trabajo",  claseBadge: "badge-trabajo",  regla: "Correos de clientes, proveedores o colaboradores sobre asuntos operativos del día a día del negocio.", esBase: true },
 ];
+const CLASES_BADGE_DISPONIBLES = ["badge-ruido", "badge-facturas", "badge-revisar", "badge-trabajo"];
 
-const STORAGE_KEY_CONFIG    = "lectorOutlookJF_config";
-const STORAGE_KEY_CARPETAS  = "lectorOutlookJF_carpetas";
+let CATEGORIAS = CATEGORIAS_BASE.map(c => Object.assign({}, c));
+
+const STORAGE_KEY_CONFIG      = "lectorOutlookJF_config";
+const STORAGE_KEY_CARPETAS    = "lectorOutlookJF_carpetas";
+const STORAGE_KEY_CATEGORIAS  = "lectorOutlookJF_categorias";
 
 const $ = (id) => document.getElementById(id);
 
@@ -395,6 +405,26 @@ function cargarCarpetas() {
     const raw = localStorage.getItem(STORAGE_KEY_CARPETAS);
     return raw ? JSON.parse(raw) : null;
   } catch (e) { return null; }
+}
+function guardarCategorias() {
+  localStorage.setItem(STORAGE_KEY_CATEGORIAS, JSON.stringify(CATEGORIAS));
+}
+function cargarCategoriasGuardadas() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CATEGORIAS);
+    if (!raw) return;
+    const guardadas = JSON.parse(raw);
+    if (Array.isArray(guardadas) && guardadas.length > 0) CATEGORIAS = guardadas;
+  } catch (e) { /* si falla, se queda la base */ }
+}
+function generarIdCategoria(nombre) {
+  const base = nombre.toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  let id = base || "cat";
+  let n = 1;
+  while (CATEGORIAS.some(c => c.id === id)) { id = base + "_" + (++n); }
+  return id;
 }
 
 /* ============================================================
@@ -466,6 +496,7 @@ $("volverConfigLink").addEventListener("click", () => {
 });
 $("abrirCarpetasLink").addEventListener("click", () => {
   mostrarPantalla("screenCarpetas");
+  renderCategorias();
   cargarListaCarpetasDesdeGraph();
 });
 
@@ -555,12 +586,16 @@ $("logoutLink").addEventListener("click", () => {
 
 function irAPantallaTrasLogin() {
   actualizarHeaderUsuario();
+  cargarCategoriasGuardadas();
   const carpetas = cargarCarpetas();
-  if (carpetas && carpetas.ruido && carpetas.facturas && carpetas.revisar && carpetas.trabajo) {
+  const todasAsignadas = carpetas && CATEGORIAS.every(cat => carpetas[cat.id]);
+  if (todasAsignadas) {
     estadoApp.carpetas = carpetas;
     mostrarPantalla("screenDashboard");
   } else {
+    estadoApp.carpetas = carpetas || {};
     mostrarPantalla("screenCarpetas");
+    renderCategorias();
     cargarListaCarpetasDesdeGraph();
   }
 }
@@ -595,6 +630,73 @@ async function listarTodasLasCarpetas() {
     } catch (e) { /* no crítico */ }
   }
   return todas;
+}
+
+/* ============================================================
+   GESTIÓN DE CATEGORÍAS (añadir/eliminar categorías propias)
+   ============================================================ */
+function renderCategorias() {
+  const cont = $("categoriasGrid");
+  if (!cont) return;
+  cont.innerHTML = CATEGORIAS.map(cat => `
+    <div class="taxonomia-item">
+      <div class="tax-nombre">${escapeHtml(cat.nombre)}</div>
+      <div class="tax-regla">${escapeHtml(cat.regla || "")}</div>
+      ${cat.esBase ? '<div style="font-size:10.5px; color:var(--pizarra); margin-top:6px; font-style:italic;">Categoría base</div>' :
+        `<button type="button" class="mini-btn" style="margin-top:8px; color:#943126; border-color:#E74C3C;" onclick="eliminarCategoria('${cat.id}')">Eliminar</button>`}
+    </div>
+  `).join("");
+}
+
+$("btnMostrarFormCategoria").addEventListener("click", () => {
+  $("formNuevaCategoria").style.display = "block";
+  $("nuevaCatNombre").value = "";
+  $("nuevaCatRegla").value = "";
+  $("nuevaCatNombre").focus();
+});
+$("btnCancelarNuevaCategoria").addEventListener("click", () => {
+  $("formNuevaCategoria").style.display = "none";
+});
+
+$("btnGuardarNuevaCategoria").addEventListener("click", () => {
+  const nombre = $("nuevaCatNombre").value.trim();
+  const regla = $("nuevaCatRegla").value.trim();
+  $("categoriasError").innerHTML = "";
+
+  if (!nombre) {
+    $("categoriasError").innerHTML = '<div class="error-banner">Ponle un nombre a la categoría.</div>';
+    return;
+  }
+  if (!regla) {
+    $("categoriasError").innerHTML = '<div class="error-banner">Describe la regla de clasificación: es lo que usa la IA para saber qué correo va aquí.</div>';
+    return;
+  }
+  if (CATEGORIAS.some(c => c.nombre.toLowerCase() === nombre.toLowerCase())) {
+    $("categoriasError").innerHTML = '<div class="error-banner">Ya existe una categoría con ese nombre.</div>';
+    return;
+  }
+
+  const id = generarIdCategoria(nombre);
+  const usadas = CATEGORIAS.map(c => c.claseBadge);
+  const claseBadge = CLASES_BADGE_DISPONIBLES.find(c => !usadas.includes(c)) || "badge-revisar";
+
+  CATEGORIAS.push({ id, nombre, claseBadge, regla, esBase: false });
+  guardarCategorias();
+  renderCategorias();
+  $("formNuevaCategoria").style.display = "none";
+
+  $("categoriasError").innerHTML = '<div class="info-banner">Categoría añadida. Recuerda: la carpeta correspondiente debe existir ya en Outlook. Selecciónala abajo y pulsa "Actualizar lista de carpetas" si no aparece todavía.</div>';
+});
+
+function eliminarCategoria(id) {
+  const cat = CATEGORIAS.find(c => c.id === id);
+  if (!cat || cat.esBase) return;
+  if (!confirm(`¿Eliminar la categoría "${cat.nombre}"? Esto no borra la carpeta de Outlook, solo deja de usarse para clasificar.`)) return;
+  CATEGORIAS = CATEGORIAS.filter(c => c.id !== id);
+  guardarCategorias();
+  renderCategorias();
+  renderSelectsCarpetas();
+  if (estadoApp.carpetas) delete estadoApp.carpetas[id];
 }
 
 function renderSelectsCarpetas() {
@@ -715,8 +817,9 @@ async function leerCorreosNuevos() {
 
     btn.innerHTML = '<span class="spinner"></span> Clasificando con IA...';
 
-    const correosCompletos = lista.value.map(msg => ({
+    const correosCompletos = lista.value.map((msg, idx) => ({
       id: msg.id,
+      indiceLocal: idx,
       remitente: (msg.from && msg.from.emailAddress) ? (msg.from.emailAddress.name || msg.from.emailAddress.address) : "(remitente desconocido)",
       remitenteEmail: (msg.from && msg.from.emailAddress) ? msg.from.emailAddress.address : "",
       asunto: msg.subject || "(sin asunto)",
@@ -787,18 +890,16 @@ async function clasificarCorreos(correos) {
     extracto: (c.cuerpo || c.snippet || "").slice(0, 600),
   }));
 
+  const reglaRevisar = CATEGORIAS.find(c => c.id === "revisar");
+  const bloqueReglas = CATEGORIAS.map(c => `- "${c.id}": ${c.regla || c.nombre}`).join("\n");
+
   const systemPrompt = `Eres el clasificador automático de correo de ${estadoApp.config.empresa || estadoApp.config.nombre || "la empresa"}.
 Tu única función es asignar UNA categoría a cada correo entrante según estas reglas exactas:
 
-- "ruido": publicidad, newsletters, notificaciones automáticas de plataformas, spam evidente, marketing masivo.
-- "facturas": facturas de proveedores recibidas, avisos de pago, recibos, cargos bancarios.
-- "revisar": correo ambiguo o de baja confianza (red de seguridad si no encaja claramente en otra categoría), y también correos que mencionan incidencias, quejas o urgencias.
-- "trabajo": correos de clientes, proveedores o colaboradores sobre asuntos operativos del día a día del negocio.
-
-Ante la duda entre "trabajo" y "revisar", si el correo menciona una incidencia, queja o urgencia, clasifica como "revisar" aunque sea de un cliente o proveedor conocido.
-
+${bloqueReglas}
+${reglaRevisar ? '\nAnte la duda entre "trabajo" y "revisar", si el correo menciona una incidencia, queja o urgencia, clasifica como "revisar" aunque sea de un cliente o proveedor conocido.\n' : ""}
 Responde ÚNICAMENTE con un array JSON, sin texto adicional, sin markdown, con un objeto por correo en el mismo orden que se te da, así:
-[{"indice":0,"categoria":"trabajo"},{"indice":1,"categoria":"ruido"}]`;
+[{"indice":0,"categoria":"${CATEGORIAS[0] ? CATEGORIAS[0].id : "revisar"}"},{"indice":1,"categoria":"${CATEGORIAS[1] ? CATEGORIAS[1].id : "revisar"}"}]`;
 
   const userPrompt = "Correos a clasificar:\n" + JSON.stringify(listaParaPrompt, null, 2);
 
@@ -815,7 +916,7 @@ Responde ÚNICAMENTE con un array JSON, sin texto adicional, sin markdown, con u
   } catch (err) {
     // Si falla la clasificación, no bloqueamos la app: todo cae en "revisar" (red de seguridad)
   }
-  correos.forEach(c => { if (!c.categoria) c.categoria = "revisar"; });
+  correos.forEach(c => { if (!c.categoria) c.categoria = (CATEGORIAS.find(cat=>cat.id==="revisar") ? "revisar" : (CATEGORIAS[0] ? CATEGORIAS[0].id : "")); });
 }
 
 function extraerTextoRespuestaClaude(data) {
@@ -907,13 +1008,13 @@ function renderListaCorreos() {
   cont.innerHTML = correosFiltrados.map(renderCorreoCard).join("");
 
   correosFiltrados.forEach(correo => {
-    const btnGenerar = document.querySelector("#correo-" + correo.id + " .btn-generar-borrador");
-    if (btnGenerar) btnGenerar.addEventListener("click", () => generarBorrador(correo.id, btnGenerar));
+    const btnGenerar = document.querySelector("#correo-" + correo.indiceLocal + " .btn-generar-borrador");
+    if (btnGenerar) btnGenerar.addEventListener("click", () => generarBorrador(correo.indiceLocal, btnGenerar));
   });
 }
 
 function renderCorreoCard(correo) {
-  const cat = CATEGORIAS.find(c => c.id === correo.categoria) || CATEGORIAS[2];
+  const cat = CATEGORIAS.find(c => c.id === correo.categoria) || CATEGORIAS.find(c => c.id === "revisar") || CATEGORIAS[0] || { nombre: "Sin categoría", claseBadge: "badge-revisar" };
 
   let estadoCarpetaHtml = "";
   if (correo.movido === true) {
@@ -924,20 +1025,18 @@ function renderCorreoCard(correo) {
 
   let accionesHtml = "";
   let borradorHtml = "";
-  if (correo.categoria === "trabajo") {
-    accionesHtml = `
-      <div class="correo-actions">
-        <button class="ai-btn btn-generar-borrador" type="button">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-          ${correo.borrador ? "Regenerar borrador" : "Generar borrador de respuesta"}
-        </button>
-      </div>
-    `;
-    borradorHtml = renderBorradorBox(correo);
-  }
+  accionesHtml = `
+    <div class="correo-actions">
+      <button class="ai-btn btn-generar-borrador" type="button">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        ${correo.borrador ? "Regenerar borrador" : "Generar borrador de respuesta"}
+      </button>
+    </div>
+  `;
+  borradorHtml = renderBorradorBox(correo);
 
   return `
-    <div class="correo-card ${correo.movido === true ? "gestionado" : ""}" id="correo-${correo.id}">
+    <div class="correo-card ${correo.movido === true ? "gestionado" : ""}" id="correo-${correo.indiceLocal}">
       <div class="correo-top">
         <div class="correo-meta">
           <div class="correo-remitente">${escapeHtml(correo.remitente)}</div>
@@ -958,24 +1057,24 @@ function renderCorreoCard(correo) {
 
 function renderBorradorBox(correo) {
   if (!correo.borrador) {
-    return `<div class="borrador-box" id="borrador-${correo.id}"></div>`;
+    return `<div class="borrador-box" id="borrador-${correo.indiceLocal}"></div>`;
   }
   if (correo.borrador.error) {
     return `
-      <div class="borrador-box visible is-error" id="borrador-${correo.id}">
+      <div class="borrador-box visible is-error" id="borrador-${correo.indiceLocal}">
         <div class="borrador-label">Error</div>
         <div class="borrador-error-text">${escapeHtml(correo.borrador.error)}</div>
       </div>
     `;
   }
   return `
-    <div class="borrador-box visible" id="borrador-${correo.id}">
+    <div class="borrador-box visible" id="borrador-${correo.indiceLocal}">
       <div class="borrador-label">Borrador de respuesta</div>
       <div class="borrador-asunto">Asunto: ${escapeHtml(correo.borrador.asunto)}</div>
-      <textarea class="borrador-textarea" id="borrador-texto-${correo.id}">${escapeHtml(correo.borrador.cuerpo)}</textarea>
+      <textarea class="borrador-textarea" id="borrador-texto-${correo.indiceLocal}">${escapeHtml(correo.borrador.cuerpo)}</textarea>
       <div class="borrador-footer-actions">
-        <button class="mini-btn principal" type="button" onclick="guardarComoDraftEnOutlook('${correo.id}')">Guardar como borrador en Outlook</button>
-        <button class="mini-btn" type="button" onclick="copiarBorrador('${correo.id}')">Copiar texto</button>
+        <button class="mini-btn principal" type="button" onclick="guardarComoDraftEnOutlook(${correo.indiceLocal})">Guardar como borrador en Outlook</button>
+        <button class="mini-btn" type="button" onclick="copiarBorrador(${correo.indiceLocal})">Copiar texto</button>
       </div>
     </div>
   `;
@@ -984,8 +1083,8 @@ function renderBorradorBox(correo) {
 /* ============================================================
    GENERACIÓN DE BORRADOR INDIVIDUAL (Claude Sonnet)
    ============================================================ */
-async function generarBorrador(correoId, btnEl) {
-  const correo = estadoApp.correos.find(c => c.id === correoId);
+async function generarBorrador(indiceLocal, btnEl) {
+  const correo = estadoApp.correos.find(c => c.indiceLocal === indiceLocal);
   if (!correo) return;
 
   const original = btnEl.innerHTML;
@@ -1021,20 +1120,20 @@ Redacta un borrador de respuesta a este correo.`;
   } finally {
     btnEl.disabled = false;
     btnEl.innerHTML = original;
-    const cardEl = document.getElementById("correo-" + correoId);
+    const cardEl = document.getElementById("correo-" + indiceLocal);
     if (cardEl) {
       cardEl.outerHTML = renderCorreoCard(correo);
-      const nuevoBtn = document.querySelector("#correo-" + correoId + " .btn-generar-borrador");
-      if (nuevoBtn) nuevoBtn.addEventListener("click", () => generarBorrador(correoId, nuevoBtn));
+      const nuevoBtn = document.querySelector("#correo-" + indiceLocal + " .btn-generar-borrador");
+      if (nuevoBtn) nuevoBtn.addEventListener("click", () => generarBorrador(indiceLocal, nuevoBtn));
     }
   }
 }
 
-function copiarBorrador(correoId) {
-  const textarea = document.getElementById("borrador-texto-" + correoId);
+function copiarBorrador(indiceLocal) {
+  const textarea = document.getElementById("borrador-texto-" + indiceLocal);
   if (!textarea) return;
   navigator.clipboard.writeText(textarea.value).then(() => {
-    const btn = document.querySelector("#borrador-" + correoId + " .mini-btn:not(.principal)");
+    const btn = document.querySelector("#borrador-" + indiceLocal + " .mini-btn:not(.principal)");
     if (btn) {
       const original = btn.textContent;
       btn.textContent = "Copiado";
@@ -1048,16 +1147,16 @@ function copiarBorrador(correoId) {
    Nunca se envía: se crea siempre como mensaje en Drafts para
    revisión humana obligatoria antes de enviar.
    ============================================================ */
-async function guardarComoDraftEnOutlook(correoId) {
-  const correo = estadoApp.correos.find(c => c.id === correoId);
+async function guardarComoDraftEnOutlook(indiceLocal) {
+  const correo = estadoApp.correos.find(c => c.indiceLocal === indiceLocal);
   if (!correo || !correo.borrador || correo.borrador.error) return;
 
-  const textarea = document.getElementById("borrador-texto-" + correoId);
+  const textarea = document.getElementById("borrador-texto-" + indiceLocal);
   const cuerpoEditado = textarea ? textarea.value : correo.borrador.cuerpo;
   const firma = estadoApp.config.firma || "";
   const cuerpoFinal = cuerpoEditado + (firma ? "\n\n" + firma : "");
 
-  const btn = document.querySelector("#borrador-" + correoId + " .mini-btn.principal");
+  const btn = document.querySelector("#borrador-" + indiceLocal + " .mini-btn.principal");
   const original = btn ? btn.innerHTML : "";
   if (btn) {
     btn.disabled = true;
@@ -1095,6 +1194,7 @@ async function guardarComoDraftEnOutlook(correoId) {
    ARRANQUE DE LA APP
    ============================================================ */
 async function arrancarApp() {
+  cargarCategoriasGuardadas();
   await inicializarMSAL();
 
   const cfg = cargarConfig();
