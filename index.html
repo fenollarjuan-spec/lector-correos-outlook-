@@ -105,7 +105,8 @@
   .correo-list { display: flex; flex-direction: column; gap: 12px; }
   .correo-card { background: var(--card-bg); border: 1px solid var(--hielo); border-radius: 10px; padding: 18px 20px; transition: box-shadow .15s; }
   .correo-card:hover { box-shadow: 0 2px 10px rgba(15,23,42,0.06); }
-  .correo-card.gestionado { opacity: .6; }
+  .correo-card.gestionado .correo-top,
+  .correo-card.gestionado .estado-carpeta { opacity: .6; }
   .correo-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .correo-meta { flex: 1; min-width: 220px; }
   .correo-remitente { font-size: 14px; font-weight: 600; color: var(--tinta); }
