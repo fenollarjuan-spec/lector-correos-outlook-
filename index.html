@@ -700,6 +700,7 @@ async function obtenerTokenAcceso() {
     });
     return resultado.accessToken;
   } catch (err) {
+    console.error("Fallo acquireTokenSilent:", err.errorCode || err.name, err.message);
     guardarEstadoAntesDeRedirect();
     await msalInstance.acquireTokenRedirect({ scopes: MSAL_SCOPES });
     throw new Error("REDIRIGIENDO");
@@ -775,9 +776,9 @@ function irAPantallaTrasLogin() {
    ============================================================ */
 async function llamarGraphAPI(url, opciones) {
   const token = await obtenerTokenAcceso();
-  const res = await fetch(url, Object.assign({
-    headers: Object.assign({ Authorization: "Bearer " + token }, (opciones && opciones.headers) || {}),
-  }, opciones || {}));
+  opciones = opciones || {};
+  const headersFinal = Object.assign({}, opciones.headers || {}, { Authorization: "Bearer " + token });
+  const res = await fetch(url, Object.assign({}, opciones, { headers: headersFinal }));
   if (res.status === 401) throw new Error("TOKEN_EXPIRADO");
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
@@ -1075,6 +1076,10 @@ async function moverCorreosClasificados(correos) {
     } catch (err) {
       correo.movido = "error";
       correo.errorMovido = err.message;
+      if (err.message === "REDIRIGIENDO" || err.message === "TOKEN_EXPIRADO" || err.message === "SIN_SESION") {
+        // La sesión ya no es válida: no tiene sentido seguir intentando mover el resto de correos.
+        throw err;
+      }
     }
   }
 }
