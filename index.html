@@ -7,7 +7,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js"></script>
+<script>
+  // Red de respaldo (Europa) si la CDN principal (US) fallara por cualquier motivo
+  if (typeof msal === "undefined") {
+    document.write(unescape("%3Cscript src='https://alcdn.msftauth.net/browser/2.35.0/js/msal-browser.min.js' type='text/javascript'%3E%3C/script%3E"));
+  }
+</script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -469,6 +475,12 @@ $("abrirCarpetasLink").addEventListener("click", () => {
 let msalInstance = null;
 
 async function inicializarMSAL() {
+  if (typeof msal === "undefined") {
+    document.body.innerHTML = '<div style="max-width:600px;margin:80px auto;padding:24px;font-family:Inter,sans-serif;">' +
+      '<h2 style="color:#1E3A5F;font-family:\'Playfair Display\',serif;">No se ha podido cargar la librería de inicio de sesión de Microsoft</h2>' +
+      '<p style="color:#475569;line-height:1.6;">Esto suele deberse a una conexión a internet inestable, o a que un bloqueador de contenido/antivirus está impidiendo la carga de <code>alcdn.msauth.net</code>. Recarga la página o prueba con otra red.</p></div>';
+    throw new Error("MSAL_NO_DISPONIBLE");
+  }
   msalInstance = new msal.PublicClientApplication({
     auth: {
       clientId: MSAL_CLIENT_ID,
