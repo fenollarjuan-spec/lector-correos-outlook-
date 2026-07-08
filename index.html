@@ -14,6 +14,8 @@
     document.write(unescape("%3Cscript src='https://alcdn.msftauth.net/browser/2.35.0/js/msal-browser.min.js' type='text/javascript'%3E%3C/script%3E"));
   }
 </script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.11.0/mammoth.browser.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -240,6 +242,24 @@
         </div>
       </div>
 
+      <div class="field">
+        <label>Contexto de empresa para redactar borradores (opcional)</label>
+        <div class="field-hint" style="margin-bottom:8px;">Sube un PDF o Word con información de la empresa, servicios, FAQ o tono de comunicación. La IA lo usará como contexto al redactar cada borrador de respuesta. Se procesa en tu navegador y el texto se guarda solo en este equipo.</div>
+        <div id="contextoDocSinCargar">
+          <input type="file" id="cfgContextoArchivo" accept=".pdf,.docx,.txt" style="font-family:'Inter',sans-serif; font-size:13px;">
+          <div id="contextoDocEstado" style="font-size:12px; color:var(--pizarra); margin-top:8px;"></div>
+        </div>
+        <div id="contextoDocCargado" style="display:none; border:1px solid var(--hielo); border-radius:8px; padding:12px 14px; margin-top:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+            <div>
+              <div style="font-size:13px; font-weight:600;" id="contextoDocNombre"></div>
+              <div style="font-size:11.5px; color:var(--pizarra);" id="contextoDocInfo"></div>
+            </div>
+            <button type="button" class="submit-btn secundario" id="btnQuitarContexto" style="padding:6px 14px; font-size:12px;">Quitar documento</button>
+          </div>
+        </div>
+      </div>
+
       <div class="info-banner">Las categorías de clasificación (Ruido, Facturas, Revisar, Trabajo, y las que añadas) se gestionan en la pantalla de "Carpetas", justo después de conectar tu cuenta de Outlook.</div>
 
       <button class="submit-btn ancho" id="btnGuardarConfig" style="margin-top:8px;">Guardar configuración y continuar</button>
@@ -361,6 +381,7 @@ let CATEGORIAS = CATEGORIAS_BASE.map(c => Object.assign({}, c));
 const STORAGE_KEY_CONFIG      = "lectorOutlookJF_config";
 const STORAGE_KEY_CARPETAS    = "lectorOutlookJF_carpetas";
 const STORAGE_KEY_CATEGORIAS  = "lectorOutlookJF_categorias";
+const STORAGE_KEY_CONTEXTO    = "lectorOutlookJF_contexto";
 
 const $ = (id) => document.getElementById(id);
 
@@ -476,7 +497,124 @@ function precargarConfigEnFormulario(cfg) {
   $("cfgNombre").value = cfg.nombre || "";
   $("cfgEmpresa").value = cfg.empresa || "";
   $("cfgFirma").value = cfg.firma || "";
+  mostrarEstadoContexto(cargarContexto());
 }
+
+/* ============================================================
+   CONTEXTO DE EMPRESA (documento PDF/Word/TXT → texto en localStorage)
+   ============================================================ */
+if (typeof pdfjsLib !== "undefined") {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.js";
+}
+
+function guardarContexto(datos) {
+  localStorage.setItem(STORAGE_KEY_CONTEXTO, JSON.stringify(datos));
+}
+function cargarContexto() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CONTEXTO);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function eliminarContexto() {
+  localStorage.removeItem(STORAGE_KEY_CONTEXTO);
+}
+
+async function extraerTextoPDF(arrayBuffer) {
+  if (typeof pdfjsLib === "undefined") throw new Error("No se ha podido cargar el lector de PDF. Comprueba tu conexión y recarga la página.");
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let texto = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const pagina = await pdf.getPage(i);
+    const contenido = await pagina.getTextContent();
+    texto += contenido.items.map(it => it.str).join(" ") + "\n\n";
+  }
+  return texto.trim();
+}
+
+async function extraerTextoWord(arrayBuffer) {
+  if (typeof mammoth === "undefined") throw new Error("No se ha podido cargar el lector de Word. Comprueba tu conexión y recarga la página.");
+  const resultado = await mammoth.extractRawText({ arrayBuffer });
+  return (resultado.value || "").trim();
+}
+
+function mostrarEstadoContexto(datos) {
+  if (datos && datos.texto) {
+    $("contextoDocSinCargar").style.display = "none";
+    $("contextoDocCargado").style.display = "block";
+    $("contextoDocNombre").textContent = datos.nombreArchivo;
+    const kb = Math.round((datos.texto.length) / 1024);
+    $("contextoDocInfo").textContent = kb + " KB de texto extraído · cargado " + new Date(datos.fecha).toLocaleDateString("es-ES");
+  } else {
+    $("contextoDocSinCargar").style.display = "block";
+    $("contextoDocCargado").style.display = "none";
+    $("contextoDocEstado").textContent = "";
+  }
+}
+
+$("cfgContextoArchivo").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+
+  const LIMITE_MB = 15;
+  if (file.size > LIMITE_MB * 1024 * 1024) {
+    $("contextoDocEstado").textContent = "El archivo pesa más de " + LIMITE_MB + " MB. Usa un documento más ligero.";
+    ev.target.value = "";
+    return;
+  }
+
+  $("contextoDocEstado").textContent = "Procesando " + file.name + "...";
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    let texto = "";
+    const nombreLower = file.name.toLowerCase();
+
+    if (nombreLower.endsWith(".pdf")) {
+      texto = await extraerTextoPDF(arrayBuffer);
+    } else if (nombreLower.endsWith(".docx")) {
+      texto = await extraerTextoWord(arrayBuffer);
+    } else if (nombreLower.endsWith(".txt")) {
+      texto = new TextDecoder("utf-8").decode(arrayBuffer);
+    } else {
+      $("contextoDocEstado").textContent = "Formato no soportado. Usa PDF, Word (.docx) o texto (.txt).";
+      ev.target.value = "";
+      return;
+    }
+
+    if (!texto || texto.length < 10) {
+      $("contextoDocEstado").textContent = "No se ha podido extraer texto de este archivo (¿es un PDF escaneado como imagen?). Prueba con un documento con texto seleccionable.";
+      ev.target.value = "";
+      return;
+    }
+
+    const LIMITE_TEXTO = 500000; // ~500.000 caracteres, margen amplio para localStorage
+    if (texto.length > LIMITE_TEXTO) {
+      texto = texto.slice(0, LIMITE_TEXTO);
+      $("contextoDocEstado").textContent = "Documento muy largo: se ha recortado a los primeros " + Math.round(LIMITE_TEXTO/1000) + "k caracteres.";
+    }
+
+    const datos = { nombreArchivo: file.name, texto: texto, fecha: new Date().toISOString() };
+    try {
+      guardarContexto(datos);
+    } catch (e) {
+      $("contextoDocEstado").textContent = "El documento se procesó pero es demasiado grande para guardarlo en este navegador. Prueba con un archivo más corto.";
+      ev.target.value = "";
+      return;
+    }
+    mostrarEstadoContexto(datos);
+    ev.target.value = "";
+  } catch (err) {
+    $("contextoDocEstado").textContent = "Error al procesar el documento: " + err.message;
+    ev.target.value = "";
+  }
+});
+
+$("btnQuitarContexto").addEventListener("click", () => {
+  if (!confirm("¿Quitar el documento de contexto? La IA dejará de usarlo al redactar borradores.")) return;
+  eliminarContexto();
+  mostrarEstadoContexto(null);
+});
 
 function irASiguientePantallaTrasConfig() {
   if (estadoApp.msalAccount) {
@@ -1124,11 +1262,16 @@ async function generarBorrador(indiceLocal, btnEl) {
   btnEl.innerHTML = '<span class="spinner dark"></span> Generando...';
 
   const cfg = estadoApp.config;
+  const contextoDoc = cargarContexto();
+  const bloqueContexto = (contextoDoc && contextoDoc.texto)
+    ? `\n\nContexto de la empresa (usa esta información para responder con precisión; si el correo pregunta algo que no está aquí, no lo inventes, indica que se confirmará):\n"""\n${contextoDoc.texto}\n"""\n`
+    : "";
+
   const systemPrompt = `Eres el asistente de redacción de correos de ${cfg.nombre || "el usuario"}${cfg.empresa ? " (" + cfg.empresa + ")" : ""}.
 Escribe SIEMPRE en español, con un tono directo, profesional pero cercano, sin rodeos, sin relleno innecesario, sin frases hechas vacías.
-No prometas plazos ni precios que no consten en el correo original: si falta un dato, indica que se confirmará, no lo inventes.
+No prometas plazos ni precios que no consten en el correo original ni en el contexto de empresa proporcionado: si falta un dato, indica que se confirmará, no lo inventes.
 No firmes el correo: la firma se añade aparte, no la incluyas en el cuerpo.
-Este borrador lo revisará siempre una persona antes de enviarlo.
+Este borrador lo revisará siempre una persona antes de enviarlo.${bloqueContexto}
 Responde ÚNICAMENTE con un JSON sin markdown, con esta forma exacta:
 {"asunto":"Re: ...","cuerpo":"texto del correo sin firma"}`;
 
@@ -1238,6 +1381,7 @@ async function arrancarApp() {
       mostrarPantalla("screenLogin");
     }
   } else {
+    mostrarEstadoContexto(cargarContexto());
     mostrarPantalla("screenConfig");
   }
 }
